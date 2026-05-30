@@ -65,21 +65,20 @@ def _slide_row_left(row: list[int]) -> tuple[list[int], bool]:
     for i in range(1, 4):
         if row[i] == 0:
             continue
-        j = i
-        while j > 0:
-            left = j - 1
-            if row[left] == 0:
-                row[left], row[j] = row[j], 0
-                j = left
-                moved = True
-            elif can_merge(row[left], row[j]) and not merged[left]:
-                row[left] = merge_value(row[left], row[j])
-                row[j] = 0
-                merged[left] = True
-                moved = True
-                break
-            else:
-                break
+        left = i - 1
+        if row[left] == 0:
+            # Empty space: slide one step left
+            row[left] = row[i]
+            row[i] = 0
+            moved = True
+        elif can_merge(row[left], row[i]) and not merged[left]:
+            # Left neighbour is settled (provably blocked by the sequential
+            # left-to-right pass) so a merge is allowed
+            row[left] = merge_value(row[left], row[i])
+            row[i] = 0
+            merged[left] = True
+            moved = True
+        # else: tiles are incompatible and there's no empty space — stay put
 
     return row, moved
 

@@ -124,15 +124,14 @@ class TestNextTileModel:
 
 class TestPlacementModel:
     def _make_placement_obs(self, is_real=True):
-        # Slide left on a board where col 3 is vacated in rows 0 and 2.
-        # We manually construct state_after with the tile placed at (0,3).
+        # One-step left slide: tiles in col 3 move to col 2.
+        # eligible = all empty col-3 cells after slide = all 4 rows.
+        # Place tile at (0,3).
         before = parse_state("0 0 0 3  0 0 0 0  0 0 0 6  0 0 0 0 / 3")
-        # After slide left: row0 -> [3,0,0,0], row2 -> [6,0,0,0]
-        # eligible = [(0,3), (2,3)]. Place tile at (0,3).
         after_board = np.array([
-            3, 0, 0, 3,
+            0, 0, 3, 3,   # 3 slid to col 2; new tile 3 placed at (0,3)
             0, 0, 0, 0,
-            6, 0, 0, 0,
+            0, 0, 6, 0,   # 6 slid to col 2
             0, 0, 0, 0,
         ], dtype=int).reshape(4, 4)
         after = GameState(after_board, NextTile([1]))
@@ -252,8 +251,8 @@ class TestStep:
         rng = np.random.default_rng(0)
         result = step(state, 3, models, rng)   # slide left
         assert isinstance(result, GameState)
-        # The 3 should have slid to col 0
-        assert result.board[0, 0] == 3
+        # One-step left slide: the 3 moves from col 3 to col 2
+        assert result.board[0, 2] == 3
 
     def test_invalid_move_returns_none(self):
         # Board already pushed left — nothing can move left
