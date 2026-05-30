@@ -102,6 +102,34 @@ class TestDoOneObservation:
         assert recorded is True
         assert after.board[3, 0] == 3   # tile placed at (row=3, col=0)
 
+    def test_impossible_position_reprompts_then_aborts(self, capsys):
+        models = Models()
+        # Rows 1 and 3 are fully packed (nothing moves), col3 stays occupied → not eligible
+        # Rows 0 and 2 have a tile only in col3 → it slides, col3 frees → eligible
+        # Eligible rows after left slide: 0 and 2 only
+        before = parse_state("0 0 0 3  3 6 12 24  0 0 0 6  6 12 24 48 / 3")
+        inputs = [
+            "l",
+            "1",    # row 1 — impossible (fully packed, not eligible)
+            "q",    # abort
+        ]
+        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        assert recorded is False
+
+    def test_single_eligible_auto_places(self, capsys):
+        models = Models()
+        # Row 0: [0,0,0,3] → slides, col3 free — only eligible row
+        # Rows 1-3: fully packed, nothing moves, col3 stays occupied
+        before = parse_state("0 0 0 3  3 6 12 24  6 12 24 48  3 6 24 48 / 3")
+        inputs = [
+            "l",    # only row 0 eligible → auto-placed, no row prompt
+            "1",    # next tile
+            "y",
+        ]
+        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        assert recorded is True
+        assert after.board[0, 3] == 3
+
 
 # ---------------------------------------------------------------------------
 # _record_chain

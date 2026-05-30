@@ -134,27 +134,42 @@ def _do_one_observation(models: Models,
 
     # --- Placement ---
     ask_axis, fixed_idx = ACTION_TRAILING[action]
-    if ask_axis == "row":
-        # col is fixed; ask which row
-        idx = _prompt_int(
-            f"  Which row did the new tile appear in? (0=top … 3=bottom, col is {fixed_idx})",
-            0, 3)
-        if idx is None:
-            return False, None
-        placement = (idx, fixed_idx)
-    else:
-        # row is fixed; ask which col
-        idx = _prompt_int(
-            f"  Which column did the new tile appear in? (0=left … 3=right, row is {fixed_idx})",
-            0, 3)
-        if idx is None:
-            return False, None
-        placement = (fixed_idx, idx)
 
-    # Warn if placement is outside eligible positions (doesn't block recording)
-    if eligible and placement not in eligible:
-        print(f"  Note: {placement} is not in the computed eligible positions {eligible}.")
-        print("  This may indicate a slide-logic discrepancy — recording anyway.")
+    # Derive the eligible indices along the free axis
+    if ask_axis == "row":
+        eligible_indices = sorted({r for r, c in eligible})
+        axis_label, lo_label, hi_label = "row", "top", "bottom"
+    else:
+        eligible_indices = sorted({c for r, c in eligible})
+        axis_label, lo_label, hi_label = "column", "left", "right"
+
+    if not eligible_indices:
+        print("  No eligible positions — this move produced no open slots.")
+        return False, None
+
+    if len(eligible_indices) == 1:
+        idx = eligible_indices[0]
+        print(f"  New tile automatically placed in {axis_label} {idx} (only option).")
+    else:
+        options_str = " ".join(str(i) for i in eligible_indices)
+        while True:
+            raw = _prompt(
+                f"  Which {axis_label} did the new tile appear in?"
+                f" (0={lo_label} … 3={hi_label}, options: {options_str}  |  q=abort)")
+            if raw.strip().lower() == "q":
+                return False, None
+            try:
+                idx = int(raw)
+            except ValueError:
+                print("  Not a valid number.")
+                continue
+            if idx not in eligible_indices:
+                print(f"  Impossible — {idx} is not an eligible {axis_label}."
+                      f" Eligible options: {options_str}")
+                continue
+            break
+
+    placement = (idx, fixed_idx) if ask_axis == "row" else (fixed_idx, idx)
 
     # --- Which tile was placed? ---
     if before.next_tile.is_bonus():
