@@ -216,18 +216,23 @@ class PlacementModel:
 
     def save(self, path: str | Path) -> None:
         slot_keys = list(self._counts.keys())
-        arrays    = [self._counts[k] for k in slot_keys]
+        # Pad each count array to length 4 (max eligible slots); store actual length in slot_keys[2]
+        padded = np.zeros((len(slot_keys), 4), dtype=np.float64)
+        for i, k in enumerate(slot_keys):
+            arr = self._counts[k]
+            padded[i, :len(arr)] = arr
         np.savez(path,
                  slot_keys=np.array(slot_keys, dtype=np.int32),
-                 **{f"arr_{i}": a for i, a in enumerate(arrays)})
+                 counts_padded=padded)
 
     @classmethod
     def load(cls, path: str | Path) -> PlacementModel:
         m = cls()
         data = np.load(path)
-        slot_keys = data["slot_keys"]
+        slot_keys     = data["slot_keys"]
+        counts_padded = data["counts_padded"]
         for i, (src, action, n) in enumerate(slot_keys):
-            m._counts[(int(src), int(action), int(n))] = data[f"arr_{i}"]
+            m._counts[(int(src), int(action), int(n))] = counts_padded[i, :n]
         return m
 
 
