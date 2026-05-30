@@ -124,39 +124,34 @@ class TestNextTileModel:
 
 class TestPlacementModel:
     def _make_placement_obs(self, is_real=True):
-        # One-step left slide: tiles in col 3 move to col 2.
-        # eligible = all empty col-3 cells after slide = all 4 rows.
-        # Place tile at (0,3).
+        # Left slide: tiles in col 3 of rows 0 and 2 slide to col 2.
+        # Tile placed at (0,3).
         before = parse_state("0 0 0 3  0 0 0 0  0 0 0 6  0 0 0 0 / 3")
         after_board = np.array([
-            0, 0, 3, 3,   # 3 slid to col 2; new tile 3 placed at (0,3)
+            0, 0, 3, 3,
             0, 0, 0, 0,
-            0, 0, 6, 0,   # 6 slid to col 2
+            0, 0, 6, 0,
             0, 0, 0, 0,
         ], dtype=int).reshape(4, 4)
         after = GameState(after_board, NextTile([1]))
         return Observation(before, 3, after, is_real=is_real)
 
-    def test_update_and_pmf(self):
+    def test_update_records_chosen_and_total(self):
         m = PlacementModel()
         obs = self._make_placement_obs(is_real=True)
-        for _ in range(10):
-            m.update(obs)
-        # With new eligible rule, all 4 col-3 cells are empty after the slide.
-        # eligible sorted = [(0,3),(1,3),(2,3),(3,3)]; always placed at (0,3) = index 0
-        p = m.pmf(3, [(0, 3), (1, 3), (2, 3), (3, 3)], real_weight=10.0)
-        assert p[0] > p[1]   # index 0 should dominate
-
-    def test_uniform_fallback(self):
-        m = PlacementModel()
-        p = m.pmf(0, [(0, 0), (1, 0), (2, 0)], real_weight=10.0)
-        assert np.allclose(p, [1/3, 1/3, 1/3])
+        m.update(obs)
+        # Some total counts should be non-zero
+        assert m._total[1].sum() > 0
+        # Chosen counts must be <= total counts everywhere
+        assert np.all(m._chosen <= m._total)
 
     def test_sample_returns_eligible_position(self):
         m = PlacementModel()
-        eligible = [(0, 3), (2, 3)]
+        from threes.simulator import _apply_slide
+        before = parse_state("0 0 0 3  0 0 0 0  0 0 0 6  0 0 0 0 / 3")
+        new_board, eligible, merge_rows = _apply_slide(before.board, 3)
         rng = np.random.default_rng(0)
-        pos = m.sample(3, eligible, rng)
+        pos = m.sample(3, new_board, eligible, merge_rows, rng)
         assert pos in eligible
 
     def test_save_load_roundtrip(self):
@@ -167,8 +162,14 @@ class TestPlacementModel:
             p = Path(td) / "pl.npz"
             m.save(p)
             m2 = PlacementModel.load(p)
-        elig = [(0, 3), (2, 3)]
-        assert np.allclose(m.pmf(3, elig), m2.pmf(3, elig))
+        assert np.allclose(m._chosen, m2._chosen)
+        assert np.allclose(m._total,  m2._total)
+
+    def test_chosen_at_most_total(self):
+        m = PlacementModel()
+        for _ in range(20):
+            m.update(self._make_placement_obs(is_real=True))
+        assert np.all(m._chosen <= m._total + 1e-9)
 
 
 # ---------------------------------------------------------------------------

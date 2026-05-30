@@ -54,95 +54,91 @@ def merge_value(a: int, b: int) -> int:
 def _slide_row_left(row: list[int]) -> tuple[list[int], bool]:
     """
     Slide a single row to the left in-place style.
-    Returns (new_row, moved) where moved=True if anything changed.
-    Each tile slides as far left as possible; a merge can only be received
-    once per cell per move.
+    Returns (new_row, moved, had_merge).
+    Each tile moves one step left; a merge is only allowed when the left
+    neighbour is provably settled (blocked by the sequential pass).
     """
     row = list(row)
     merged = [False] * 4   # cell i has already absorbed a merge this move
     moved = False
+    had_merge = False
 
     for i in range(1, 4):
         if row[i] == 0:
             continue
         left = i - 1
         if row[left] == 0:
-            # Empty space: slide one step left
             row[left] = row[i]
             row[i] = 0
             moved = True
         elif can_merge(row[left], row[i]) and not merged[left]:
-            # Left neighbour is settled (provably blocked by the sequential
-            # left-to-right pass) so a merge is allowed
             row[left] = merge_value(row[left], row[i])
             row[i] = 0
             merged[left] = True
             moved = True
-        # else: tiles are incompatible and there's no empty space — stay put
+            had_merge = True
+        # else: incompatible tiles with no empty space — stay put
 
-    return row, moved
+    return row, moved, had_merge
 
 
 # ---------------------------------------------------------------------------
 # Full-board slide
 # ---------------------------------------------------------------------------
 
-def _apply_slide(board: np.ndarray, action: int) -> tuple[np.ndarray, list[tuple[int, int]]]:
+def _apply_slide(board: np.ndarray, action: int
+                 ) -> tuple[np.ndarray, list[tuple[int, int]], frozenset[int]]:
     """
     Apply a slide action to the board.
 
     Returns:
-        new_board   : 4x4 int array after the slide
-        eligible    : list of (row, col) positions on the trailing edge that
-                      are empty after the slide (valid spawn points)
+        new_board              : 4x4 int array after the slide
+        eligible               : list of (row, col) positions on the trailing
+                                 edge that are empty after the slide
+        merge_rows_transformed : frozenset of row indices (in the normalised
+                                 leftward-sliding frame) that contained a merge.
+                                 Callers map these back to original rows/cols
+                                 depending on the action.
 
-    If no tile moved the board is returned unchanged and eligible is empty.
+    If no tile moved the board is returned unchanged and both eligible and
+    merge_rows_transformed are empty.
     """
     b = board.copy()
 
-    # Normalise every direction to a leftward slide on rows,
-    # then un-normalise afterward.
-    #
-    #   up    -> transpose          -> slide left -> transpose back
-    #   right -> flip each row      -> slide left -> flip back
-    #   down  -> transpose + flip   -> slide left -> flip + transpose back
-    #   left  -> as-is
-
-    if action == 0:    # up
+    if action == 0:    # up:   transpose
         b = b.T.copy()
-    elif action == 1:  # right
+    elif action == 1:  # right: flip rows
         b = np.fliplr(b)
-    elif action == 2:  # down
+    elif action == 2:  # down:  transpose + flip
         b = np.fliplr(b.T.copy())
-    # action == 3 (left): nothing
+    # action == 3 (left): no transform
 
-    # Slide each row left; after the slide, any empty cell on the trailing
-    # edge (col 3 in the transformed frame) is a valid spawn point.
     any_moved = False
+    merge_rows_transformed: set[int] = set()
     for r in range(4):
-        new_row, moved = _slide_row_left(list(b[r]))
+        new_row, moved, had_merge = _slide_row_left(list(b[r]))
         b[r] = new_row
         if moved:
             any_moved = True
+        if had_merge:
+            merge_rows_transformed.add(r)
 
     if not any_moved:
-        return board.copy(), []
+        return board.copy(), [], frozenset()
 
     trailing_empty = [r for r in range(4) if b[r, 3] == 0]
 
-    # Convert trailing_empty row indices back to (row, col) in original frame
     eligible_original = []
     for r in trailing_empty:
-        if action == 0:    # up: we transposed, so (r, 3) in transposed = (3, r) in original
+        if action == 0:
             eligible_original.append((3, r))
-        elif action == 1:  # right: fliplr, col 3 in flipped = col 0 in original
+        elif action == 1:
             eligible_original.append((r, 0))
-        elif action == 2:  # down: fliplr(transpose), (r,3) -> flip -> (r,0) -> transpose -> (0,r)
+        elif action == 2:
             eligible_original.append((0, r))
-        else:              # left: col 3 stays col 3
+        else:
             eligible_original.append((r, 3))
 
-    # Un-normalise the board
     if action == 0:
         b = b.T.copy()
     elif action == 1:
@@ -150,7 +146,7 @@ def _apply_slide(board: np.ndarray, action: int) -> tuple[np.ndarray, list[tuple
     elif action == 2:
         b = (np.fliplr(b)).T.copy()
 
-    return b, eligible_original
+    return b, eligible_original, frozenset(merge_rows_transformed)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +203,7 @@ class Observation:
         Infer which tile was placed by diffing the boards after accounting
         for the slide.  Returns None if inference fails.
         """
-        slid_board, _ = _apply_slide(self.state_before.board, self.action)
+        slid_board, _, _ = _apply_slide(self.state_before.board, self.action)
         diff = self.state_after.board - slid_board
         nonzero = [(r, c) for r in range(4) for c in range(4) if diff[r, c] != 0]
         if len(nonzero) == 1:
@@ -217,7 +213,7 @@ class Observation:
 
     def placed_position(self) -> tuple[int, int] | None:
         """Infer where the new tile was placed."""
-        slid_board, _ = _apply_slide(self.state_before.board, self.action)
+        slid_board, _, _ = _apply_slide(self.state_before.board, self.action)
         diff = self.state_after.board - slid_board
         nonzero = [(r, c) for r in range(4) for c in range(4) if diff[r, c] != 0]
         if len(nonzero) == 1:

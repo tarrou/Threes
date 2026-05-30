@@ -37,58 +37,58 @@ class TestMerge:
 class TestSlideRow:
     def test_slide_one_step_into_empty(self):
         # 3 slides one step; 6 slides one step (not all the way past the gap)
-        row, moved = _slide_row_left([0, 3, 0, 6])
+        row, moved, _ = _slide_row_left([0, 3, 0, 6])
         assert row == [3, 0, 6, 0]
         assert moved
 
     def test_slide_through_vacated_space(self):
         # 3 slides to pos0; 6 slides into the space 3 vacated
-        row, moved = _slide_row_left([0, 3, 6, 0])
+        row, moved, _ = _slide_row_left([0, 3, 6, 0])
         assert row == [3, 6, 0, 0]
         assert moved
 
     def test_merge_equal_at_wall(self):
         # Left 3 is at the wall — right 3 merges into it
-        row, moved = _slide_row_left([3, 3, 0, 0])
+        row, moved, _ = _slide_row_left([3, 3, 0, 0])
         assert row == [6, 0, 0, 0]
         assert moved
 
     def test_merge_1_2_at_wall(self):
-        row, moved = _slide_row_left([1, 2, 0, 0])
+        row, moved, _ = _slide_row_left([1, 2, 0, 0])
         assert row == [3, 0, 0, 0]
         assert moved
 
     def test_no_merge_when_target_can_move(self):
         # Left 3 has empty space ahead — right 3 cannot merge, both just slide
-        row, moved = _slide_row_left([0, 3, 3, 0])
+        row, moved, _ = _slide_row_left([0, 3, 3, 0])
         assert row == [3, 3, 0, 0]
         assert moved
 
     def test_no_merge_across_gap(self):
         # Two 3s separated by a gap — each moves one step, no merge
-        row, moved = _slide_row_left([0, 0, 3, 3])
+        row, moved, _ = _slide_row_left([0, 0, 3, 3])
         assert row == [0, 3, 3, 0]
         assert moved
 
     def test_merge_when_blocked_by_incompatible_tile(self):
         # 1 can't pass the 3, so 2 behind can merge into 1
-        row, moved = _slide_row_left([3, 1, 2, 0])
+        row, moved, _ = _slide_row_left([3, 1, 2, 0])
         assert row == [3, 3, 0, 0]
         assert moved
 
     def test_chain_1_plus_2_then_slide(self):
         # 1+2=3 at wall, then 3 and 6 slide one step each
-        row, moved = _slide_row_left([1, 2, 3, 6])
+        row, moved, _ = _slide_row_left([1, 2, 3, 6])
         assert row == [3, 3, 6, 0]
         assert moved
 
     def test_no_move(self):
-        row, moved = _slide_row_left([3, 6, 12, 24])
+        row, moved, _ = _slide_row_left([3, 6, 12, 24])
         assert row == [3, 6, 12, 24]
         assert not moved
 
     def test_already_leftmost(self):
-        row, moved = _slide_row_left([6, 0, 0, 0])
+        row, moved, _ = _slide_row_left([6, 0, 0, 0])
         assert row == [6, 0, 0, 0]
         assert not moved
 
@@ -112,7 +112,7 @@ class TestApplySlide:
             3, 6, 12, 0,
             6, 6, 0, 0,
         ])
-        new_b, eligible = _apply_slide(b, 3)  # left
+        new_b, eligible, _ = _apply_slide(b, 3)  # left
         assert (0, 3) in eligible   # freed by slide
         assert (2, 3) in eligible   # col-3 was already empty; board moved so it's eligible
         assert (3, 3) in eligible   # was already empty, still eligible
@@ -125,7 +125,7 @@ class TestApplySlide:
             3, 6, 0, 0,
             0, 0, 0, 0,
         ])
-        new_b, eligible = _apply_slide(b, 1)  # right
+        new_b, eligible, _ = _apply_slide(b, 1)  # right
         # Row 0: [3,0,0,0] slides right -> [0,0,0,3]; col-0 had 3, now 0 -> eligible (0,0)
         assert (0, 0) in eligible
         # Row 2: [3,6,0,0] -> [0,0,3,6]; col-0 had 3, now 0 -> eligible (2,0)
@@ -139,7 +139,7 @@ class TestApplySlide:
             3,  6, 12, 24,
             6, 12, 24, 48,
         ])
-        new_b, eligible = _apply_slide(b, 3)  # left, nothing can move
+        new_b, eligible, _ = _apply_slide(b, 3)  # left, nothing can move
         assert eligible == []
         assert np.array_equal(new_b, b)
 
@@ -151,7 +151,7 @@ class TestApplySlide:
             0, 0, 0, 0,
             3, 6, 0, 0,
         ])
-        new_b, eligible = _apply_slide(b, 0)  # up
+        new_b, eligible, _ = _apply_slide(b, 0)  # up
         # Col 0: [0,0,0,3] -> [3,0,0,0]; row-3 had 3, now 0 -> eligible (3,0)
         assert (3, 0) in eligible
         # Col 1: [0,0,0,6] -> [6,0,0,0]; row-3 had 6, now 0 -> eligible (3,1)
@@ -165,7 +165,7 @@ class TestApplySlide:
             0, 0, 0, 0,
             0, 0, 0, 0,
         ])
-        new_b, eligible = _apply_slide(b, 2)  # down
+        new_b, eligible, _ = _apply_slide(b, 2)  # down
         assert (0, 0) in eligible
         assert (0, 1) in eligible
 

@@ -16,7 +16,7 @@ from .simulator import (
     GameState, NextTile, Observation,
     parse_state, _apply_slide, ACTION_NAMES, TILE_SET, TILE_VALUES,
 )
-from .models import Models, TILE_INDEX, REAL, SIM
+from .models import Models, TILE_INDEX, REAL, SIM, GRAVITY_NAMES
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -120,7 +120,7 @@ def _do_one_observation(models: Models,
         action = _enter_action()
         if action is None:
             return False, None
-        slid_board, eligible = _apply_slide(before.board, action)
+        slid_board, eligible, merge_rows = _apply_slide(before.board, action)
         if eligible:
             break
         print(f"  '{ACTION_NAMES[action]}' doesn't move any tiles on this board."
@@ -313,45 +313,42 @@ def _show_next(models: Models) -> None:
 
 
 def _show_place(models: Models) -> None:
-    """Print the PlacementModel distribution for every (action, n_eligible) with data."""
-    print("\n=== Placement Distributions ===")
+    """
+    Print the PlacementModel as a P(chosen | features) table.
+    Rows: gravity (low/med/high).  Cols: n_tiles_after (0-3).
+    Shown separately for merge=False and merge=True.
+    """
+    print("\n=== Placement Distributions  [P(chosen | features)] ===")
     m = models.placement
-    if not m._counts:
+    total_obs = m.n_observations()
+    if total_obs["real"] + total_obs["simulated"] == 0:
         print("  No data recorded yet.")
         return
 
-    # Group by (action, n_eligible)
-    seen = set()
-    for src, action, n in sorted(m._counts.keys()):
-        seen.add((action, n))
+    chosen = m._chosen[REAL] * 10.0 + m._chosen[SIM]   # shape (2, 3, 4)
+    total  = m._total[REAL]  * 10.0 + m._total[SIM]
 
-    for action, n in sorted(seen):
-        real_arr = m._counts.get((REAL, action, n), None)
-        sim_arr  = m._counts.get((SIM,  action, n), None)
-        real_counts = real_arr if real_arr is not None else [0] * n
-        sim_counts  = sim_arr  if sim_arr  is not None else [0] * n
-        total_r = sum(real_counts)
-        total_s = sum(sim_counts)
-        if total_r + total_s == 0:
-            continue
+    col_header = "  gravity  |" + "".join(f"  n={n}  " for n in range(4))
+    divider    = "  " + "-" * (len(col_header) - 2)
 
-        ask_axis, fixed_idx = ACTION_TRAILING[action]
-        axis_label = "row" if ask_axis == "row" else "col"
-
-        print(f"\n  Action={ACTION_NAMES[action]}, eligible slots={n}"
-              f"  (real: {int(total_r)}, sim: {int(total_s)})")
-        pmf = real_counts * 10.0 + sim_counts
-        pmf_total = pmf.sum()
-        if pmf_total > 0:
-            pmf /= pmf_total
-        ordinals = ["1st", "2nd", "3rd", "4th"]
-        for i in range(n):
-            p = pmf[i]
-            r = int(real_counts[i])
-            s = int(sim_counts[i])
-            bar = "█" * int(p * 30)
-            label = f"{ordinals[i]} eligible {axis_label}"
-            print(f"    {label}  {p:5.1%}  {bar}  (real={r}, sim={s})")
+    for merge in (0, 1):
+        label = "Merge" if merge else "No merge"
+        print(f"\n  {label}:")
+        print(col_header)
+        print(divider)
+        for grav in (0, 1, 2):
+            row = f"  {GRAVITY_NAMES[grav]:7}  |"
+            for nt in range(4):
+                c = chosen[merge, grav, nt]
+                t = total[merge, grav, nt]
+                if t == 0:
+                    row += "    —    "
+                else:
+                    p = c / t
+                    row += f"  {p:4.0%}({int(t):3d})"
+            print(row)
+    print(f"\n  Total observations — real: {total_obs['real']}, "
+          f"simulated: {total_obs['simulated']}")
 
 
 def _show_start(models: Models) -> None:
