@@ -11,8 +11,9 @@ build/
 .venv
 env/
 
-# Checkpoints / weights
+# Checkpoints / weights / training data
 weights/
+data/
 *.npy
 *.npz
 
