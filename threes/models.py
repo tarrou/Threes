@@ -248,6 +248,11 @@ class PlacementModel:
     def __init__(self) -> None:
         self._chosen = np.zeros((2, 2, 3, 4), dtype=np.float64)
         self._total  = np.zeros((2, 2, 3, 4), dtype=np.float64)
+        # Cross-observation counters: when ≥1 eligible position had a merge,
+        # how often was the chosen position one that had a merge?
+        # Shape (2,): [SIM, REAL]
+        self._merge_avail_chose_merge    = np.zeros(2, dtype=np.float64)
+        self._merge_avail_chose_no_merge = np.zeros(2, dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Learning
@@ -261,16 +266,26 @@ class PlacementModel:
         if placed is None:
             return
 
+        merge_flags = {pos: _had_merge(pos, obs.action, merge_rows)
+                       for pos in eligible}
         gravity_cats = _gravity_categories(new_board, eligible)
         src = REAL if obs.is_real else SIM
 
         for pos in eligible:
-            merge   = int(_had_merge(pos, obs.action, merge_rows))
+            merge   = int(merge_flags[pos])
             gravity = gravity_cats[pos]
             n_tiles = min(_n_tiles_after(new_board, obs.action, pos), 3)
             self._total[src, merge, gravity, n_tiles] += 1.0
             if pos == placed:
                 self._chosen[src, merge, gravity, n_tiles] += 1.0
+
+        # Cross-observation merge-preference counter
+        any_merge = any(merge_flags.values())
+        if any_merge:
+            if merge_flags[placed]:
+                self._merge_avail_chose_merge[src]    += 1.0
+            else:
+                self._merge_avail_chose_no_merge[src] += 1.0
 
     # ------------------------------------------------------------------
     # Inference
@@ -314,6 +329,24 @@ class PlacementModel:
         return {"real": int(self._chosen[REAL].sum()),
                 "simulated": int(self._chosen[SIM].sum())}
 
+    def merge_preference(self, real_weight: float = 10.0
+                         ) -> dict[str, int | float | None]:
+        """
+        When ≥1 eligible position had a merge, how often was the chosen
+        position the one with a merge?
+        Returns chose_merge, chose_no_merge, and rate (or None if no data).
+        """
+        cm = (self._merge_avail_chose_merge[REAL]    * real_weight
+              + self._merge_avail_chose_merge[SIM])
+        cn = (self._merge_avail_chose_no_merge[REAL] * real_weight
+              + self._merge_avail_chose_no_merge[SIM])
+        total = cm + cn
+        return {
+            "chose_merge":    int(cm),
+            "chose_no_merge": int(cn),
+            "rate":           float(cm / total) if total > 0 else None,
+        }
+
     def table(self, real_weight: float = 10.0
               ) -> np.ndarray:
         """
@@ -330,7 +363,11 @@ class PlacementModel:
     # Persistence
 
     def save(self, path: str | Path) -> None:
-        np.savez(path, chosen=self._chosen, total=self._total)
+        np.savez(path,
+                 chosen=self._chosen,
+                 total=self._total,
+                 merge_avail_chose_merge=self._merge_avail_chose_merge,
+                 merge_avail_chose_no_merge=self._merge_avail_chose_no_merge)
 
     @classmethod
     def load(cls, path: str | Path) -> PlacementModel:
@@ -338,6 +375,10 @@ class PlacementModel:
         data = np.load(path)
         m._chosen = data["chosen"]
         m._total  = data["total"]
+        # Graceful load for files saved before these counters existed
+        if "merge_avail_chose_merge" in data:
+            m._merge_avail_chose_merge    = data["merge_avail_chose_merge"]
+            m._merge_avail_chose_no_merge = data["merge_avail_chose_no_merge"]
         return m
 
 

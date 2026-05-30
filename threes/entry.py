@@ -348,8 +348,13 @@ def _show_place(models: Models) -> None:
                     p = c / t
                     row += f"  {p:4.0%}({int(t):3d})"
             print(row)
+    mp = models.placement.merge_preference()
     print(f"\n  Total observations — real: {total_obs['real']}, "
           f"simulated: {total_obs['simulated']}")
+    if mp["rate"] is not None:
+        print(f"  When merge available: chose merge row/col "
+              f"{mp['rate']:.0%} of the time  "
+              f"(merge={mp['chose_merge']}, no-merge={mp['chose_no_merge']})")
 
 
 def _show_start(models: Models) -> None:
