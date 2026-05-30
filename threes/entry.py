@@ -115,19 +115,18 @@ def _do_one_observation(models: Models,
     after_state is the completed after GameState (board + next tile),
     or None if the flow was abandoned.
     """
-    # --- Action ---
-    action = _enter_action()
-    if action is None:
-        return False, None
-    print(f"  Action: {ACTION_NAMES[action]}")
-
-    # --- Apply slide ---
-    slid_board, eligible = _apply_slide(before.board, action)
-
-    if not eligible:
-        print("  Warning: no tiles moved — this action is invalid on this board.")
-        if not _confirm("  Continue anyway?"):
+    # --- Action (re-prompt until a valid move is entered or user quits) ---
+    while True:
+        action = _enter_action()
+        if action is None:
             return False, None
+        slid_board, eligible = _apply_slide(before.board, action)
+        if eligible:
+            break
+        print(f"  '{ACTION_NAMES[action]}' doesn't move any tiles on this board."
+              f" Enter a different action (or q to abort).")
+
+    print(f"  Action: {ACTION_NAMES[action]}")
 
     print("\n  Board after slide:")
     print(_fmt_board(slid_board))
@@ -208,11 +207,13 @@ def _do_one_observation(models: Models,
 
 
 def _enter_action() -> int | None:
-    """Prompt for an action, return int 0-3 or None on error."""
-    raw = _prompt("Action (up/right/down/left  or  u/r/d/l)").lower()
+    """Prompt for an action. Returns int 0-3, or None if user types q/quit."""
+    raw = _prompt("Action (u/r/d/l  or  up/right/down/left  |  q=abort)").lower()
+    if raw in ("q", "quit"):
+        return None
     action = ACTION_ALIASES.get(raw)
     if action is None:
-        print(f"  Unknown action '{raw}'. Use: up/right/down/left or u/r/d/l.")
+        print(f"  Unknown action '{raw}'.")
     return action
 
 
@@ -232,9 +233,12 @@ def _record_chain(models: Models) -> int:
         return 0
 
     total_recorded = 0
+    first = True
 
     while True:
-        _show_board("  Current board", before.board, before.next_tile)
+        if not first:
+            _show_board("  Current board", before.board, before.next_tile)
+        first = False
 
         recorded, after_state = _do_one_observation(models, before)
 
