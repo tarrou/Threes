@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environments
+.env
+.venv
+env/
+
+# Checkpoints / weights
+weights/
+*.npy
+*.npz
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# macOS
+.DS_Store
