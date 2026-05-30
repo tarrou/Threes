@@ -14,9 +14,9 @@ import numpy as np
 
 from .simulator import (
     GameState, NextTile, Observation,
-    parse_state, _apply_slide, ACTION_NAMES, TILE_SET,
+    parse_state, _apply_slide, ACTION_NAMES, TILE_SET, TILE_VALUES,
 )
-from .models import Models
+from .models import Models, TILE_INDEX, REAL, SIM
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -274,6 +274,101 @@ def _enter_state(prompt: str) -> GameState | None:
     return state
 
 
+# ---------------------------------------------------------------------------
+# Distribution inspection
+# ---------------------------------------------------------------------------
+
+def _show_next(models: Models) -> None:
+    """Print the NextTileModel distribution for every bucket that has data."""
+    print("\n=== Next Tile Distributions ===")
+    m = models.next_tile
+    any_data = False
+    for bucket_idx, max_tile in enumerate(TILE_VALUES):
+        real_counts = m._counts[REAL, bucket_idx]
+        sim_counts  = m._counts[SIM,  bucket_idx]
+        total = real_counts.sum() + sim_counts.sum()
+        if total == 0:
+            continue
+        any_data = True
+        print(f"\n  Max tile on board = {max_tile}"
+              f"  (real: {int(real_counts.sum())}, sim: {int(sim_counts.sum())})")
+        # Use default real_weight=10 for the displayed PMF
+        board_proxy = max_tile * (1 if max_tile > 0 else 0)   # dummy — we use bucket directly
+        pmf = (real_counts * 10.0 + sim_counts)
+        pmf_sum = pmf.sum()
+        if pmf_sum > 0:
+            pmf /= pmf_sum
+        for vi, tile_val in enumerate(TILE_VALUES):
+            if tile_val == 0:
+                continue
+            p = pmf[vi]
+            r = int(real_counts[vi])
+            s = int(sim_counts[vi])
+            if r + s == 0:
+                continue
+            bar = "█" * int(p * 30)
+            print(f"    {tile_val:6}  {p:5.1%}  {bar}  (real={r}, sim={s})")
+    if not any_data:
+        print("  No data recorded yet.")
+
+
+def _show_place(models: Models) -> None:
+    """Print the PlacementModel distribution for every (action, n_eligible) with data."""
+    print("\n=== Placement Distributions ===")
+    m = models.placement
+    if not m._counts:
+        print("  No data recorded yet.")
+        return
+
+    # Group by (action, n_eligible)
+    seen = set()
+    for src, action, n in sorted(m._counts.keys()):
+        seen.add((action, n))
+
+    for action, n in sorted(seen):
+        real_arr = m._counts.get((REAL, action, n), None)
+        sim_arr  = m._counts.get((SIM,  action, n), None)
+        real_counts = real_arr if real_arr is not None else [0] * n
+        sim_counts  = sim_arr  if sim_arr  is not None else [0] * n
+        total_r = sum(real_counts)
+        total_s = sum(sim_counts)
+        if total_r + total_s == 0:
+            continue
+
+        ask_axis, fixed_idx = ACTION_TRAILING[action]
+        axis_label = "row" if ask_axis == "row" else "col"
+
+        print(f"\n  Action={ACTION_NAMES[action]}, eligible slots={n}"
+              f"  (real: {int(total_r)}, sim: {int(total_s)})")
+        pmf = real_counts * 10.0 + sim_counts
+        pmf_total = pmf.sum()
+        if pmf_total > 0:
+            pmf /= pmf_total
+        ordinals = ["1st", "2nd", "3rd", "4th"]
+        for i in range(n):
+            p = pmf[i]
+            r = int(real_counts[i])
+            s = int(sim_counts[i])
+            bar = "█" * int(p * 30)
+            label = f"{ordinals[i]} eligible {axis_label}"
+            print(f"    {label}  {p:5.1%}  {bar}  (real={r}, sim={s})")
+
+
+def _show_start(models: Models) -> None:
+    """Print all stored starting boards."""
+    print("\n=== Starting Boards ===")
+    m = models.start_board
+    if not m._boards:
+        print("  No starting boards recorded yet.")
+        return
+    for i, (board, cands, is_real) in enumerate(
+            zip(m._boards, m._next_tiles, m._is_real)):
+        tag = "real" if is_real else "sim"
+        print(f"\n  [{i}] ({tag})  next: {' '.join(str(v) for v in cands)}")
+        for r in range(4):
+            print("    " + "  ".join(f"{v:5}" for v in board[r]))
+
+
 def _record_start(models: Models) -> bool:
     """Enter a starting board example."""
     print("\n--- Starting Board ---")
@@ -292,11 +387,14 @@ def _record_start(models: Models) -> bool:
 
 HELP_TEXT = """
 Commands:
-  obs   (o)  — record one or more chained game observations
-  start (s)  — record a starting board
-  show        — show model observation counts
-  quit  (q)  — save models and exit
-  help  (?)  — show this message
+  obs   (o)      — record one or more chained game observations
+  start (s)      — record a starting board
+  show           — show model observation counts
+  show next      — next-tile probability distributions by max-tile bucket
+  show place     — placement probability distributions by action
+  show start     — all stored starting boards
+  quit  (q)      — save models and exit
+  help  (?)      — show this message
 """
 
 _current_data_dir: Path = DEFAULT_DATA_DIR
@@ -338,6 +436,12 @@ def run(data_dir: Path = DEFAULT_DATA_DIR) -> None:
         elif cmd == "show":
             print()
             print(models.summary())
+        elif cmd == "show next":
+            _show_next(models)
+        elif cmd in ("show place", "show placement"):
+            _show_place(models)
+        elif cmd in ("show start", "show starts"):
+            _show_start(models)
 
         elif cmd in ("quit", "q", "exit"):
             models.save(data_dir)
