@@ -95,7 +95,7 @@ def _apply_slide(board: np.ndarray, action: int) -> tuple[np.ndarray, list[tuple
     Returns:
         new_board   : 4x4 int array after the slide
         eligible    : list of (row, col) positions on the trailing edge that
-                      were vacated by a tile that moved (valid spawn points)
+                      are empty after the slide (valid spawn points)
 
     If no tile moved the board is returned unchanged and eligible is empty.
     """
@@ -117,26 +117,23 @@ def _apply_slide(board: np.ndarray, action: int) -> tuple[np.ndarray, list[tuple
         b = np.fliplr(b.T.copy())
     # action == 3 (left): nothing
 
-    # Slide each row left; track which rightmost cells were vacated
+    # Slide each row left; after the slide, any empty cell on the trailing
+    # edge (col 3 in the transformed frame) is a valid spawn point.
     any_moved = False
-    trailing_vacated = []   # indices (row index in the transformed frame) whose col-3 was freed
     for r in range(4):
-        original_last = b[r, 3]
         new_row, moved = _slide_row_left(list(b[r]))
         b[r] = new_row
         if moved:
             any_moved = True
-        # A trailing-edge spawn point is col 3 in transformed frame,
-        # only if it was non-zero before (tile moved away) and is zero now.
-        if original_last != 0 and b[r, 3] == 0:
-            trailing_vacated.append(r)
 
     if not any_moved:
         return board.copy(), []
 
-    # Convert trailing_vacated row indices back to (row, col) in original frame
+    trailing_empty = [r for r in range(4) if b[r, 3] == 0]
+
+    # Convert trailing_empty row indices back to (row, col) in original frame
     eligible_original = []
-    for r in trailing_vacated:
+    for r in trailing_empty:
         if action == 0:    # up: we transposed, so (r, 3) in transposed = (3, r) in original
             eligible_original.append((3, r))
         elif action == 1:  # right: fliplr, col 3 in flipped = col 0 in original

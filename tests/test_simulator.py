@@ -82,10 +82,10 @@ class TestApplySlide:
         return np.array(values, dtype=int).reshape(4, 4)
 
     def test_slide_left_eligible(self):
-        # Row 0: [3, 0, 0, 6] -> [3, 6, 0, 0]; col-3 was 6, now 0 -> eligible (0,3)
-        # Row 1: [0, 0, 0, 0] -> no change
-        # Row 2: [3, 6, 12, 0] -> no change (col-3 already 0)
-        # Row 3: [6, 6, 0, 0] -> [12, 0, 0, 0]; col-3 was 0 -> NOT eligible
+        # Row 0: [3, 0, 0, 6] -> [3, 6, 0, 0]; col-3 now empty -> eligible (0,3)
+        # Row 1: [0, 0, 0, 0] -> no change; no move so not counted
+        # Row 2: [3, 6, 12, 0] -> no change (already blocked); col-3 was already 0
+        # Row 3: [6, 6, 0, 0] -> [12, 0, 0, 0]; col-3 already 0 -> eligible (3,3)
         b = self._board([
             3, 0, 0, 6,
             0, 0, 0, 0,
@@ -93,9 +93,9 @@ class TestApplySlide:
             6, 6, 0, 0,
         ])
         new_b, eligible = _apply_slide(b, 3)  # left
-        assert (0, 3) in eligible
-        assert (2, 3) not in eligible  # was already 0
-        assert (3, 3) not in eligible  # was already 0
+        assert (0, 3) in eligible   # freed by slide
+        assert (2, 3) in eligible   # col-3 was already empty; board moved so it's eligible
+        assert (3, 3) in eligible   # was already empty, still eligible
 
     def test_slide_right_eligible(self):
         # Trailing edge for right is col 0

@@ -143,8 +143,9 @@ class TestPlacementModel:
         obs = self._make_placement_obs(is_real=True)
         for _ in range(10):
             m.update(obs)
-        # eligible sorted = [(0,3), (2,3)]; always placed at (0,3) = index 0
-        p = m.pmf(3, [(0, 3), (2, 3)], real_weight=10.0)
+        # With new eligible rule, all 4 col-3 cells are empty after the slide.
+        # eligible sorted = [(0,3),(1,3),(2,3),(3,3)]; always placed at (0,3) = index 0
+        p = m.pmf(3, [(0, 3), (1, 3), (2, 3), (3, 3)], real_weight=10.0)
         assert p[0] > p[1]   # index 0 should dominate
 
     def test_uniform_fallback(self):
@@ -277,4 +278,5 @@ class TestStep:
         result = step(state, 3, models, rng)
         assert isinstance(result, GameState)
         # After slide left, a tile must have been placed on col 3
-        assert result.board[0, 3] in {1, 2, 3}  # default prior
+        # A tile from the prior (1, 2, or 3) should appear somewhere in col 3
+        assert any(result.board[r, 3] in {1, 2, 3} for r in range(4))
