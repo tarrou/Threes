@@ -10,9 +10,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+
 from .simulator import (
     GameState, NextTile, Observation,
-    parse_state, _apply_slide, ACTION_NAMES,
+    parse_state, _apply_slide, ACTION_NAMES, TILE_SET,
 )
 from .models import Models
 
@@ -29,21 +31,33 @@ ACTION_ALIASES: dict[str, int] = {
     "left": 3,  "l": 3,
 }
 
+# For each action: (axis, fixed_index)
+# axis 0 = row is fixed (up/down), axis 1 = col is fixed (left/right)
+# fixed_index = the row or col number where the new tile always appears
+ACTION_TRAILING: dict[int, tuple[str, int]] = {
+    0: ("col", 3),   # up:    tile in row 3, ask which col
+    1: ("row", 0),   # right: tile in col 0, ask which row
+    2: ("col", 0),   # down:  tile in row 0, ask which col
+    3: ("row", 3),   # left:  tile in col 3, ask which row
+}
+
 # ---------------------------------------------------------------------------
 # Display helpers
 # ---------------------------------------------------------------------------
 
-def _fmt_board(state: GameState) -> str:
+def _fmt_board(board: np.ndarray, next_tile: NextTile | None = None) -> str:
     rows = []
     for r in range(4):
-        rows.append("  ".join(f"{v:5}" for v in state.board[r]))
-    rows.append(f"  next: {state.next_tile}")
+        rows.append("  ".join(f"{v:5}" for v in board[r]))
+    if next_tile is not None:
+        rows.append(f"  next: {next_tile}")
     return "\n".join(rows)
 
 
-def _show_state(label: str, state: GameState) -> None:
+def _show_board(label: str, board: np.ndarray,
+                next_tile: NextTile | None = None) -> None:
     print(f"\n{label}:")
-    print(_fmt_board(state))
+    print(_fmt_board(board, next_tile))
 
 
 def _prompt(msg: str) -> str:
@@ -55,22 +69,127 @@ def _confirm(msg: str) -> bool:
     return ans in ("y", "yes")
 
 
-# ---------------------------------------------------------------------------
-# Sub-flows
-# ---------------------------------------------------------------------------
+def _prompt_int(msg: str, lo: int, hi: int) -> int | None:
+    """Prompt for an integer in [lo, hi]. Returns None on bad input."""
+    raw = _prompt(msg)
+    try:
+        val = int(raw)
+        if lo <= val <= hi:
+            return val
+        print(f"  Must be between {lo} and {hi}.")
+    except ValueError:
+        print(f"  Not a valid number.")
+    return None
 
-def _enter_state(prompt: str) -> GameState | None:
-    """Prompt for a state string, parse it, display it, return it or None on error."""
+
+def _enter_next_tile(prompt: str) -> NextTile | None:
+    """Prompt for 1 or 3 tile values. Returns None on error."""
     raw = _prompt(prompt)
     if not raw:
         return None
     try:
-        state = parse_state(raw)
-    except ValueError as e:
-        print(f"  Parse error: {e}")
+        vals = list(map(int, raw.split()))
+        if len(vals) not in (1, 3):
+            print("  Enter 1 value (normal tile) or 3 values (bonus hint).")
+            return None
+        for v in vals:
+            if v not in TILE_SET:
+                print(f"  Invalid tile value: {v}")
+                return None
+        return NextTile(vals)
+    except ValueError:
+        print("  Could not parse tile values.")
         return None
-    _show_state("  Board", state)
-    return state
+
+
+# ---------------------------------------------------------------------------
+# Core observation flow
+# ---------------------------------------------------------------------------
+
+def _do_one_observation(models: Models,
+                        before: GameState) -> tuple[bool, GameState | None]:
+    """
+    Carry out one before→action→after observation starting from `before`.
+
+    Returns (recorded, after_state).
+    after_state is the completed after GameState (board + next tile),
+    or None if the flow was abandoned.
+    """
+    # --- Action ---
+    action = _enter_action()
+    if action is None:
+        return False, None
+    print(f"  Action: {ACTION_NAMES[action]}")
+
+    # --- Apply slide ---
+    slid_board, eligible = _apply_slide(before.board, action)
+
+    if not eligible:
+        print("  Warning: no tiles moved — this action is invalid on this board.")
+        if not _confirm("  Continue anyway?"):
+            return False, None
+
+    print("\n  Board after slide:")
+    print(_fmt_board(slid_board))
+
+    # --- Placement ---
+    ask_axis, fixed_idx = ACTION_TRAILING[action]
+    if ask_axis == "row":
+        # col is fixed; ask which row
+        idx = _prompt_int(
+            f"  Which row did the new tile appear in? (0=top … 3=bottom, col is {fixed_idx})",
+            0, 3)
+        if idx is None:
+            return False, None
+        placement = (idx, fixed_idx)
+    else:
+        # row is fixed; ask which col
+        idx = _prompt_int(
+            f"  Which column did the new tile appear in? (0=left … 3=right, row is {fixed_idx})",
+            0, 3)
+        if idx is None:
+            return False, None
+        placement = (fixed_idx, idx)
+
+    # Warn if placement is outside eligible positions (doesn't block recording)
+    if eligible and placement not in eligible:
+        print(f"  Note: {placement} is not in the computed eligible positions {eligible}.")
+        print("  This may indicate a slide-logic discrepancy — recording anyway.")
+
+    # --- Which tile was placed? ---
+    if before.next_tile.is_bonus():
+        cands = before.next_tile.candidates
+        label = "  ".join(f"{i}={v}" for i, v in enumerate(cands))
+        choice = _prompt_int(f"  Bonus tile — which was placed? ({label})", 0, 2)
+        if choice is None:
+            return False, None
+        tile_placed = cands[choice]
+    else:
+        tile_placed = before.next_tile.candidates[0]
+
+    # Place tile on board
+    after_board = slid_board.copy()
+    after_board[placement] = tile_placed
+
+    print("\n  Board with new tile placed:")
+    print(_fmt_board(after_board))
+
+    # --- Next tile ---
+    next_tile = _enter_next_tile("  Next tile shown now (value, or 3 values for bonus)")
+    if next_tile is None:
+        return False, None
+
+    after_state = GameState(after_board, next_tile)
+    _show_board("  After state", after_board, next_tile)
+
+    # --- Confirm ---
+    if not _confirm("  Record this observation?"):
+        print("  Skipped.")
+        return False, after_state   # still return after_state so caller can chain
+
+    obs = Observation(before, action, after_state, is_real=True)
+    models.update(obs)
+    return True, after_state
 
 
 def _enter_action() -> int | None:
@@ -82,59 +201,58 @@ def _enter_action() -> int | None:
     return action
 
 
-def _record_observation(models: Models) -> bool:
+# ---------------------------------------------------------------------------
+# Multi-observation chain
+# ---------------------------------------------------------------------------
+
+def _record_chain(models: Models) -> int:
     """
-    Walk through entering a full before→action→after observation.
-    Returns True if an observation was recorded, False otherwise.
+    Enter one or more chained observations.
+    Returns the number of observations recorded.
     """
     print("\n--- New Observation ---")
 
     before = _enter_state("BEFORE state  (16 board values / next tile candidates)")
     if before is None:
-        return False
+        return 0
 
-    action = _enter_action()
-    if action is None:
-        return False
+    total_recorded = 0
 
-    print(f"  Action: {ACTION_NAMES[action]}")
+    while True:
+        _show_board("  Current board", before.board, before.next_tile)
 
-    # Show what the slide produces so the user can spot inconsistencies
-    slid_board, eligible = _apply_slide(before.board, action)
-    if not eligible:
-        print("  Warning: this action produces no valid move on the entered board.")
-        if not _confirm("  Continue anyway?"):
-            return False
+        recorded, after_state = _do_one_observation(models, before)
 
-    after = _enter_state("AFTER state   (16 board values / next tile candidates)")
-    if after is None:
-        return False
+        if recorded:
+            total_recorded += 1
+            models.save(_current_data_dir)
+            print("  Saved.")
+            print()
+            print(models.summary())
 
-    obs = Observation(before, action, after, is_real=True)
+        if after_state is None:
+            break
 
-    # Infer and display what was placed
-    placed_tile = obs.placed_tile()
-    placed_pos  = obs.placed_position()
+        if _confirm("\n  Continue from this state?"):
+            before = after_state
+        else:
+            break
 
-    print()
-    if placed_tile is not None and placed_pos is not None:
-        print(f"  Inferred placement: tile {placed_tile} at row {placed_pos[0]}, col {placed_pos[1]}")
-        if placed_tile not in before.next_tile.candidates:
-            print(f"  Warning: placed tile {placed_tile} is not in next-tile candidates "
-                  f"{before.next_tile.candidates}")
-        if eligible and placed_pos not in eligible:
-            print(f"  Warning: placement position {placed_pos} is not on the eligible "
-                  f"trailing edge {eligible}")
-    else:
-        print("  Could not infer placement (board diff is ambiguous or zero).")
-        print("  The observation will still be recorded for next-tile learning.")
+    return total_recorded
 
-    if not _confirm("  Record this observation?"):
-        print("  Skipped.")
-        return False
 
-    models.update(obs)
-    return True
+def _enter_state(prompt: str) -> GameState | None:
+    """Prompt for a state string, parse it, display it, return it or None on error."""
+    raw = _prompt(prompt)
+    if not raw:
+        return None
+    try:
+        state = parse_state(raw)
+    except ValueError as e:
+        print(f"  Parse error: {e}")
+        return None
+    _show_board("  Board", state.board, state.next_tile)
+    return state
 
 
 def _record_start(models: Models) -> bool:
@@ -155,18 +273,21 @@ def _record_start(models: Models) -> bool:
 
 HELP_TEXT = """
 Commands:
-  obs   (o)  — record a game observation (before → action → after)
+  obs   (o)  — record one or more chained game observations
   start (s)  — record a starting board
   show        — show model observation counts
   quit  (q)  — save models and exit
   help  (?)  — show this message
 """
 
+_current_data_dir: Path = DEFAULT_DATA_DIR
+
 
 def run(data_dir: Path = DEFAULT_DATA_DIR) -> None:
+    global _current_data_dir
+    _current_data_dir = data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load or create models
     try:
         models = Models.load(data_dir)
         print(f"Models loaded from {data_dir}")
@@ -185,12 +306,7 @@ def run(data_dir: Path = DEFAULT_DATA_DIR) -> None:
             cmd = "quit"
 
         if cmd in ("obs", "o"):
-            recorded = _record_observation(models)
-            if recorded:
-                models.save(data_dir)
-                print("  Saved.")
-                print()
-                print(models.summary())
+            _record_chain(models)
 
         elif cmd in ("start", "s"):
             recorded = _record_start(models)
