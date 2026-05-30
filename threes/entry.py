@@ -279,25 +279,26 @@ def _enter_state(prompt: str) -> GameState | None:
 # ---------------------------------------------------------------------------
 
 def _show_next(models: Models) -> None:
-    """Print the NextTileModel distribution for every bucket that has data."""
+    """
+    Print the NextTileModel distribution for every max-tile bucket with data.
+    Counts are summed over the median-tile dimension for display.
+    """
     print("\n=== Next Tile Distributions ===")
     m = models.next_tile
     any_data = False
     for bucket_idx, max_tile in enumerate(TILE_VALUES):
-        real_counts = m._counts[REAL, bucket_idx]
-        sim_counts  = m._counts[SIM,  bucket_idx]
+        # Sum over median dimension (axis 0 of the (15,15) slice)
+        real_counts = m._counts[REAL, bucket_idx].sum(axis=0)  # shape (15,)
+        sim_counts  = m._counts[SIM,  bucket_idx].sum(axis=0)
         total = real_counts.sum() + sim_counts.sum()
         if total == 0:
             continue
         any_data = True
         print(f"\n  Max tile on board = {max_tile}"
               f"  (real: {int(real_counts.sum())}, sim: {int(sim_counts.sum())})")
-        # Use default real_weight=10 for the displayed PMF
-        board_proxy = max_tile * (1 if max_tile > 0 else 0)   # dummy — we use bucket directly
-        pmf = (real_counts * 10.0 + sim_counts)
-        pmf_sum = pmf.sum()
-        if pmf_sum > 0:
-            pmf /= pmf_sum
+        pmf = real_counts * 10.0 + sim_counts
+        if pmf.sum() > 0:
+            pmf /= pmf.sum()
         for vi, tile_val in enumerate(TILE_VALUES):
             if tile_val == 0:
                 continue
