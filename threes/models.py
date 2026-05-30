@@ -215,18 +215,18 @@ class PlacementModel:
     # Persistence
 
     def save(self, path: str | Path) -> None:
-        keys   = list(self._counts.keys())
-        arrays = [self._counts[k] for k in keys]
+        slot_keys = list(self._counts.keys())
+        arrays    = [self._counts[k] for k in slot_keys]
         np.savez(path,
-                 keys=np.array(keys, dtype=np.int32),
+                 slot_keys=np.array(slot_keys, dtype=np.int32),
                  **{f"arr_{i}": a for i, a in enumerate(arrays)})
 
     @classmethod
     def load(cls, path: str | Path) -> PlacementModel:
         m = cls()
         data = np.load(path)
-        keys = data["keys"]
-        for i, (src, action, n) in enumerate(keys):
+        slot_keys = data["slot_keys"]
+        for i, (src, action, n) in enumerate(slot_keys):
             m._counts[(int(src), int(action), int(n))] = data[f"arr_{i}"]
         return m
 
