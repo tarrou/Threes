@@ -23,22 +23,27 @@ from .models import Models, TILE_INDEX, REAL, SIM, GRAVITY_NAMES
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_DATA_DIR  = Path(__file__).parent.parent / "data" / "models"
-OBS_LOG_PATH      = Path(__file__).parent.parent / "data" / "observations.jsonl"
+DEFAULT_DATA_DIR = Path(__file__).parent.parent / "data" / "models"
+
+
+def _obs_log_path() -> Path:
+    """Return the observation log path, co-located with the model files."""
+    return _current_data_dir.parent / "observations.jsonl"
 
 
 def _log_observation(obs: "Observation") -> None:
     """Append a raw observation to the JSONL log for future replay."""
     record = {
-        "before_board":   obs.state_before.board.flatten().tolist(),
-        "before_next":    obs.state_before.next_tile.candidates,
-        "action":         obs.action,
-        "after_board":    obs.state_after.board.flatten().tolist(),
-        "after_next":     obs.state_after.next_tile.candidates,
-        "is_real":        obs.is_real,
+        "before_board": obs.state_before.board.flatten().tolist(),
+        "before_next":  obs.state_before.next_tile.candidates,
+        "action":       obs.action,
+        "after_board":  obs.state_after.board.flatten().tolist(),
+        "after_next":   obs.state_after.next_tile.candidates,
+        "is_real":      obs.is_real,
     }
-    OBS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OBS_LOG_PATH.open("a") as f:
+    log = _obs_log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a") as f:
         f.write(json.dumps(record) + "\n")
 
 ACTION_ALIASES: dict[str, int] = {
@@ -136,7 +141,7 @@ def _do_one_observation(models: Models,
     while True:
         action = _enter_action()
         if action is None:
-            return False, None
+            return False, None, None
         slid_board, eligible, merge_rows = _apply_slide(before.board, action)
         if eligible:
             break
@@ -161,7 +166,7 @@ def _do_one_observation(models: Models,
 
     if not eligible_indices:
         print("  No eligible positions — this move produced no open slots.")
-        return False, None
+        return False, None, None
 
     if len(eligible_indices) == 1:
         idx = eligible_indices[0]
@@ -173,7 +178,7 @@ def _do_one_observation(models: Models,
                 f"  Which {axis_label} did the new tile appear in?"
                 f" (0={lo_label} … 3={hi_label}, options: {options_str}  |  q=abort)")
             if raw.strip().lower() == "q":
-                return False, None
+                return False, None, None
             try:
                 idx = int(raw)
             except ValueError:
@@ -193,7 +198,7 @@ def _do_one_observation(models: Models,
         label = "  ".join(f"{i}={v}" for i, v in enumerate(cands))
         choice = _prompt_int(f"  Bonus tile — which was placed? ({label})", 0, 2)
         if choice is None:
-            return False, None
+            return False, None, None
         tile_placed = cands[choice]
     else:
         tile_placed = before.next_tile.candidates[0]
@@ -208,7 +213,7 @@ def _do_one_observation(models: Models,
     # --- Next tile ---
     next_tile = _enter_next_tile("  Next tile shown now (value, or 3 values for bonus)")
     if next_tile is None:
-        return False, None
+        return False, None, None
 
     after_state = GameState(after_board, next_tile)
     _show_board("  After state", after_board, next_tile)
@@ -216,13 +221,11 @@ def _do_one_observation(models: Models,
     # --- Confirm ---
     if not _confirm("  Record this observation?"):
         print("  Skipped.")
-        return False, after_state   # still return after_state so caller can chain
+        return False, after_state, None   # still return after_state so caller can chain
 
     obs = Observation(before, action, after_state, is_real=True)
     models.update(obs)
-    if obs.is_real:
-        _log_observation(obs)
-    return True, after_state
+    return True, after_state, obs
 
 
 def _enter_action() -> int | None:
@@ -259,10 +262,12 @@ def _record_chain(models: Models) -> int:
             _show_board("  Current board", before.board, before.next_tile)
         first = False
 
-        recorded, after_state = _do_one_observation(models, before)
+        recorded, after_state, obs = _do_one_observation(models, before)
 
         if recorded:
             total_recorded += 1
+            if obs is not None and obs.is_real:
+                _log_observation(obs)
             models.save(_current_data_dir)
             print("  Saved.")
             print()
@@ -392,11 +397,13 @@ def _show_start(models: Models) -> None:
 
 
 def replay_observations(models: Models,
-                        log_path: Path = OBS_LOG_PATH) -> int:
+                        log_path: Path | None = None) -> int:
     """
     Rebuild models from the JSONL observation log.
     Returns the number of observations replayed.
     """
+    if log_path is None:
+        log_path = _obs_log_path()
     if not log_path.exists():
         return 0
     count = 0
@@ -496,9 +503,10 @@ def run(data_dir: Path = DEFAULT_DATA_DIR) -> None:
             _show_start(models)
 
         elif cmd == "replay":
-            print(f"  Replaying from {OBS_LOG_PATH} ...")
+            log = _obs_log_path()
+            print(f"  Replaying from {log} ...")
             models = Models()
-            n = replay_observations(models, OBS_LOG_PATH)
+            n = replay_observations(models, log)
             models.save(data_dir)
             print(f"  Replayed {n} observations and saved.")
             print()

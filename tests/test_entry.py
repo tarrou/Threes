@@ -10,6 +10,14 @@ from threes.models import Models
 from threes import entry
 
 
+@pytest.fixture(autouse=True)
+def isolate_data_dir(tmp_path):
+    """Point _current_data_dir at tmp_path for every test so no test writes to data/."""
+    entry._current_data_dir = tmp_path
+    yield
+    entry._current_data_dir = entry.DEFAULT_DATA_DIR
+
+
 def _run_with_input(inputs: list[str], fn, *args):
     joined = "\n".join(inputs) + "\n"
     old_stdin = sys.stdin
@@ -39,7 +47,7 @@ class TestDoOneObservation:
             "1",        # next tile shown is 1
             "y",        # confirm record
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is True
         assert after is not None
         assert models.placement.n_observations()["real"] == 1
@@ -49,7 +57,7 @@ class TestDoOneObservation:
         models = Models()
         before = self._before()
         inputs = ["l", "0", "1", "n"]   # decline to record
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is False
         assert after is not None   # after_state still returned for optional chaining
 
@@ -57,7 +65,7 @@ class TestDoOneObservation:
         models = Models()
         before = self._before()
         inputs = ["x"]   # invalid action
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is False
         assert after is None
 
@@ -71,7 +79,7 @@ class TestDoOneObservation:
             "3",    # next tile
             "y",    # confirm
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is True
         # Tile placed should be 12 (candidate index 1)
         assert after.board[0, 3] == 12
@@ -85,7 +93,7 @@ class TestDoOneObservation:
             "1",    # next tile
             "y",
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is True
         assert after.board[0, 0] == 3   # tile placed at (row=0, col=0)
 
@@ -98,7 +106,7 @@ class TestDoOneObservation:
             "1",    # next tile
             "y",
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is True
         assert after.board[3, 0] == 3   # tile placed at (row=3, col=0)
 
@@ -113,7 +121,7 @@ class TestDoOneObservation:
             "1",    # row 1 — impossible (fully packed, not eligible)
             "q",    # abort
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is False
 
     def test_single_eligible_auto_places(self, capsys):
@@ -126,7 +134,7 @@ class TestDoOneObservation:
             "1",    # next tile
             "y",
         ]
-        recorded, after = _run_with_input(inputs, entry._do_one_observation, models, before)
+        recorded, after, _ = _run_with_input(inputs, entry._do_one_observation, models, before)
         assert recorded is True
         assert after.board[0, 3] == 3
 
