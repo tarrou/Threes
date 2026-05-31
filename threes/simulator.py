@@ -163,7 +163,7 @@ class NextTile:
     candidates: list[int]
 
     def is_bonus(self) -> bool:
-        return len(self.candidates) == 3
+        return len(self.candidates) > 1
 
     def __str__(self) -> str:
         return " ".join(str(c) for c in self.candidates)
@@ -246,8 +246,8 @@ def parse_state(text: str) -> GameState:
 
     if len(board_vals) != 16:
         raise ValueError(f"Expected 16 board values, got {len(board_vals)}.")
-    if len(tile_vals) not in (1, 3):
-        raise ValueError(f"Next tile must be 1 or 3 values, got {len(tile_vals)}.")
+    if len(tile_vals) not in (1, 2, 3):
+        raise ValueError(f"Next tile must be 1, 2, or 3 values, got {len(tile_vals)}.")
     for v in board_vals:
         if v not in TILE_SET:
             raise ValueError(f"Invalid tile value: {v}. Valid values: {TILE_VALUES}")

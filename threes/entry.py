@@ -111,8 +111,8 @@ def _enter_next_tile(prompt: str) -> NextTile | None:
         return None
     try:
         vals = list(map(int, raw.split()))
-        if len(vals) not in (1, 3):
-            print("  Enter 1 value (normal tile) or 3 values (bonus hint).")
+        if len(vals) not in (1, 2, 3):
+            print("  Enter 1 value (normal tile) or 2–3 values (bonus hint).")
             return None
         for v in vals:
             if v not in TILE_SET:
@@ -196,7 +196,7 @@ def _do_one_observation(models: Models,
     if before.next_tile.is_bonus():
         cands = before.next_tile.candidates
         label = "  ".join(f"{i}={v}" for i, v in enumerate(cands))
-        choice = _prompt_int(f"  Bonus tile — which was placed? ({label})", 0, 2)
+        choice = _prompt_int(f"  Bonus tile — which was placed? ({label})", 0, len(cands) - 1)
         if choice is None:
             return False, None, None
         tile_placed = cands[choice]
