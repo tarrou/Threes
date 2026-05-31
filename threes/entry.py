@@ -220,7 +220,8 @@ def _do_one_observation(models: Models,
 
     obs = Observation(before, action, after_state, is_real=True)
     models.update(obs)
-    _log_observation(obs)
+    if obs.is_real:
+        _log_observation(obs)
     return True, after_state
 
 
