@@ -8,6 +8,7 @@ Run with:
 
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,23 @@ from .models import Models, TILE_INDEX, REAL, SIM, GRAVITY_NAMES
 # Defaults
 # ---------------------------------------------------------------------------
 
-DEFAULT_DATA_DIR = Path(__file__).parent.parent / "data" / "models"
+DEFAULT_DATA_DIR  = Path(__file__).parent.parent / "data" / "models"
+OBS_LOG_PATH      = Path(__file__).parent.parent / "data" / "observations.jsonl"
+
+
+def _log_observation(obs: "Observation") -> None:
+    """Append a raw observation to the JSONL log for future replay."""
+    record = {
+        "before_board":   obs.state_before.board.flatten().tolist(),
+        "before_next":    obs.state_before.next_tile.candidates,
+        "action":         obs.action,
+        "after_board":    obs.state_after.board.flatten().tolist(),
+        "after_next":     obs.state_after.next_tile.candidates,
+        "is_real":        obs.is_real,
+    }
+    OBS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OBS_LOG_PATH.open("a") as f:
+        f.write(json.dumps(record) + "\n")
 
 ACTION_ALIASES: dict[str, int] = {
     "up": 0,    "u": 0,
@@ -203,6 +220,7 @@ def _do_one_observation(models: Models,
 
     obs = Observation(before, action, after_state, is_real=True)
     models.update(obs)
+    _log_observation(obs)
     return True, after_state
 
 
@@ -372,6 +390,35 @@ def _show_start(models: Models) -> None:
             print("    " + "  ".join(f"{v:5}" for v in board[r]))
 
 
+def replay_observations(models: Models,
+                        log_path: Path = OBS_LOG_PATH) -> int:
+    """
+    Rebuild models from the JSONL observation log.
+    Returns the number of observations replayed.
+    """
+    if not log_path.exists():
+        return 0
+    count = 0
+    with log_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            before = GameState(
+                board=np.array(r["before_board"], dtype=int).reshape(4, 4),
+                next_tile=NextTile(r["before_next"]),
+            )
+            after = GameState(
+                board=np.array(r["after_board"], dtype=int).reshape(4, 4),
+                next_tile=NextTile(r["after_next"]),
+            )
+            obs = Observation(before, r["action"], after, is_real=r["is_real"])
+            models.update(obs)
+            count += 1
+    return count
+
+
 def _record_start(models: Models) -> bool:
     """Enter a starting board example."""
     print("\n--- Starting Board ---")
@@ -396,6 +443,7 @@ Commands:
   show next      — next-tile probability distributions by max-tile bucket
   show place     — placement probability distributions by action
   show start     — all stored starting boards
+  replay         — rebuild models from saved observation log
   quit  (q)      — save models and exit
   help  (?)      — show this message
 """
@@ -445,6 +493,15 @@ def run(data_dir: Path = DEFAULT_DATA_DIR) -> None:
             _show_place(models)
         elif cmd in ("show start", "show starts"):
             _show_start(models)
+
+        elif cmd == "replay":
+            print(f"  Replaying from {OBS_LOG_PATH} ...")
+            models = Models()
+            n = replay_observations(models, OBS_LOG_PATH)
+            models.save(data_dir)
+            print(f"  Replayed {n} observations and saved.")
+            print()
+            print(models.summary())
 
         elif cmd in ("quit", "q", "exit"):
             models.save(data_dir)
