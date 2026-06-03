@@ -253,6 +253,10 @@ class PlacementModel:
         # Shape (2,): [SIM, REAL]
         self._merge_avail_chose_merge    = np.zeros(2, dtype=np.float64)
         self._merge_avail_chose_no_merge = np.zeros(2, dtype=np.float64)
+        # Mixed-case counters: when BOTH merge and non-merge positions were
+        # eligible simultaneously, which type was chosen?
+        self._mixed_chose_merge    = np.zeros(2, dtype=np.float64)
+        self._mixed_chose_no_merge = np.zeros(2, dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Learning
@@ -279,13 +283,22 @@ class PlacementModel:
             if pos == placed:
                 self._chosen[src, merge, gravity, n_tiles] += 1.0
 
-        # Cross-observation merge-preference counter
-        any_merge = any(merge_flags.values())
+        # Cross-observation merge-preference counters
+        any_merge    = any(merge_flags.values())
+        any_no_merge = not all(merge_flags.values())
+
         if any_merge:
             if merge_flags[placed]:
                 self._merge_avail_chose_merge[src]    += 1.0
             else:
                 self._merge_avail_chose_no_merge[src] += 1.0
+
+        # Mixed case: at least one merge AND at least one non-merge eligible
+        if any_merge and any_no_merge:
+            if merge_flags[placed]:
+                self._mixed_chose_merge[src]    += 1.0
+            else:
+                self._mixed_chose_no_merge[src] += 1.0
 
     # ------------------------------------------------------------------
     # Inference
@@ -330,21 +343,29 @@ class PlacementModel:
                 "simulated": int(self._chosen[SIM].sum())}
 
     def merge_preference(self, real_weight: float = 10.0
-                         ) -> dict[str, int | float | None]:
+                         ) -> dict[str, object]:
         """
-        When ≥1 eligible position had a merge, how often was the chosen
-        position the one with a merge?
-        Returns chose_merge, chose_no_merge, and rate (or None if no data).
+        Two merge-preference statistics:
+        - overall: when ≥1 eligible position had a merge, how often was the
+          chosen position one with a merge?
+        - mixed: same, but only observations where BOTH merge and non-merge
+          positions were eligible (isolates the true preference signal).
         """
-        cm = (self._merge_avail_chose_merge[REAL]    * real_weight
-              + self._merge_avail_chose_merge[SIM])
-        cn = (self._merge_avail_chose_no_merge[REAL] * real_weight
-              + self._merge_avail_chose_no_merge[SIM])
-        total = cm + cn
+        def _stat(chose_m, chose_n):
+            cm = chose_m[REAL] * real_weight + chose_m[SIM]
+            cn = chose_n[REAL] * real_weight + chose_n[SIM]
+            total = cm + cn
+            return {
+                "chose_merge":    int(cm),
+                "chose_no_merge": int(cn),
+                "rate": float(cm / total) if total > 0 else None,
+            }
+
         return {
-            "chose_merge":    int(cm),
-            "chose_no_merge": int(cn),
-            "rate":           float(cm / total) if total > 0 else None,
+            "overall": _stat(self._merge_avail_chose_merge,
+                             self._merge_avail_chose_no_merge),
+            "mixed":   _stat(self._mixed_chose_merge,
+                             self._mixed_chose_no_merge),
         }
 
     def table(self, real_weight: float = 10.0
@@ -367,7 +388,9 @@ class PlacementModel:
                  chosen=self._chosen,
                  total=self._total,
                  merge_avail_chose_merge=self._merge_avail_chose_merge,
-                 merge_avail_chose_no_merge=self._merge_avail_chose_no_merge)
+                 merge_avail_chose_no_merge=self._merge_avail_chose_no_merge,
+                 mixed_chose_merge=self._mixed_chose_merge,
+                 mixed_chose_no_merge=self._mixed_chose_no_merge)
 
     @classmethod
     def load(cls, path: str | Path) -> PlacementModel:
@@ -375,10 +398,12 @@ class PlacementModel:
         data = np.load(path)
         m._chosen = data["chosen"]
         m._total  = data["total"]
-        # Graceful load for files saved before these counters existed
         if "merge_avail_chose_merge" in data:
             m._merge_avail_chose_merge    = data["merge_avail_chose_merge"]
             m._merge_avail_chose_no_merge = data["merge_avail_chose_no_merge"]
+        if "mixed_chose_merge" in data:
+            m._mixed_chose_merge    = data["mixed_chose_merge"]
+            m._mixed_chose_no_merge = data["mixed_chose_no_merge"]
         return m
 
 
