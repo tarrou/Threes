@@ -442,6 +442,65 @@ class StartBoardModel:
         real = sum(self._is_real)
         return {"real": real, "simulated": len(self._boards) - real}
 
+    # ------------------------------------------------------------------
+    # Generative model
+
+    def tile_value_pmf(self, real_weight: float = 10.0) -> np.ndarray:
+        """
+        PMF over non-zero tile values {1, 2, 3} observed in start boards.
+        Returns array of length 3 in order [1, 2, 3].
+        Falls back to uniform if no data.
+        """
+        counts = np.zeros(3, dtype=np.float64)   # indices: 0=tile1, 1=tile2, 2=tile3
+        value_map = {1: 0, 2: 1, 3: 2}
+        for board, is_real in zip(self._boards, self._is_real):
+            w = real_weight if is_real else 1.0
+            for v in board.flatten():
+                if int(v) in value_map:
+                    counts[value_map[int(v)]] += w
+        total = counts.sum()
+        return counts / total if total > 0 else np.ones(3) / 3.0
+
+    def next_tile_pmf(self, real_weight: float = 10.0) -> np.ndarray:
+        """
+        PMF over next tile values observed in start board next-tile slots.
+        Returns array of length 3 in order [1, 2, 3].
+        Falls back to uniform if no data.
+        """
+        counts = np.zeros(3, dtype=np.float64)
+        value_map = {1: 0, 2: 1, 3: 2}
+        for cands, is_real in zip(self._next_tiles, self._is_real):
+            w = real_weight if is_real else 1.0
+            weight = w / len(cands)
+            for v in cands:
+                if int(v) in value_map:
+                    counts[value_map[int(v)]] += weight
+        total = counts.sum()
+        return counts / total if total > 0 else np.ones(3) / 3.0
+
+    def generate(self, rng: np.random.Generator,
+                 n_tiles: int = 9,
+                 real_weight: float = 10.0) -> GameState:
+        """
+        Generate a random starting state by:
+          1. Choosing n_tiles random positions on the 4×4 board.
+          2. Filling each with a value sampled from the observed
+             tile-value distribution (1, 2, or 3).
+          3. Sampling a next tile from the observed next-tile distribution.
+        """
+        tile_pmf = self.tile_value_pmf(real_weight)
+        next_pmf = self.next_tile_pmf(real_weight)
+        tile_vals = [1, 2, 3]
+
+        positions = rng.choice(16, size=n_tiles, replace=False)
+        board = np.zeros((4, 4), dtype=int)
+        for pos in positions:
+            r, c = divmod(int(pos), 4)
+            board[r, c] = tile_vals[int(rng.choice(3, p=tile_pmf))]
+
+        next_val = tile_vals[int(rng.choice(3, p=next_pmf))]
+        return GameState(board=board, next_tile=NextTile([next_val]))
+
     def save(self, path: str | Path) -> None:
         boards = np.stack(self._boards) if self._boards else np.empty((0, 4, 4), dtype=int)
         nt_padded  = np.zeros((len(self._next_tiles), 3), dtype=np.int32)
