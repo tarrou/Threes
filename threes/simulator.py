@@ -260,6 +260,24 @@ def parse_state(text: str) -> GameState:
 
 
 # ---------------------------------------------------------------------------
+# Scoring
+# ---------------------------------------------------------------------------
+
+def score_board(board: np.ndarray) -> float:
+    """
+    Score a board: each tile >= 3 contributes 3^(log2(tile/3) + 1).
+    Tiles 1 and 2 contribute 0.
+
+    Examples: 3→3, 6→9, 12→27, 24→81, 48→243 ...
+    """
+    total = 0.0
+    for v in board.flatten():
+        if v >= 3:
+            total += 3.0 ** (np.log2(float(v) / 3.0) + 1.0)
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Neural-net encoding
 # ---------------------------------------------------------------------------
 
